@@ -93,6 +93,12 @@ class ValueOutOfRangeError(SmartHomeException):
                                                     'maximumValue': maxValue})
 
 
+class UnsupportedOperationError(SmartHomeException):
+    def __init__(self):
+        super(UnsupportedOperationError,
+            self).__init__('UnsupportedOperationError')
+
+
 @handle('HealthCheckRequest')
 def handle_health_check(ha, payload):
     r = {}
@@ -133,9 +139,9 @@ def discover_appliances(ha):
         return x['entity_id'].split('.', 1)[0]
 
     def is_supported_entity(x):
-        allowed_entities = ['group', 'input_boolean', 'light', 'media_player',
-                            'scene', 'script', 'switch', 'garage_door', 'lock',
-                            'cover']
+        allowed_entities = ['automation', 'cover', 'garage_door', 'group',
+                            'input_boolean', 'input_slider', 'light', 'lock',
+                            'media_player', 'scene', 'script', 'switch']
         if 'ha_allowed_entities' in cfg:
             allowed_entities = cfg['ha_allowed_entities']
         return entity_domain(x) in allowed_entities
@@ -145,7 +151,9 @@ def discover_appliances(ha):
         return 'haaska_hidden' in attr and attr['haaska_hidden']
 
     def mk_appliance(x):
-        dimmable = entity_domain(x) in ('light', 'group', 'media_player')
+        binary = entity_domain(x) not in ('input_slider')
+        dimmable = entity_domain(x) in ('group', 'light', 'input_slider',
+                                        'media_player')
         o = {}
         # this needs to be unique and has limitations on allowed characters:
         o['applianceId'] = sha1(x['entity_id']).hexdigest()
@@ -166,7 +174,9 @@ def discover_appliances(ha):
             o['friendlyDescription'] = 'Home Assistant ' + \
                 entity_domain(x).replace('_', ' ').title()
         o['isReachable'] = True
-        o['actions'] = ['turnOn', 'turnOff']
+        o['actions'] = []
+        if binary:
+            o['actions'] += ['turnOn', 'turnOff']
         if dimmable:
             o['actions'] += ['incrementPercentage', 'decrementPercentage',
                              'setPercentage']
@@ -274,13 +284,6 @@ class Entity(object):
         self._call_service('homeassistant/turn_off')
 
 
-class GarageDoorEntity(Entity):
-    def turn_on(self):
-        self._call_service('garage_door/open')
-
-    def turn_off(self):
-        self._call_service('garage_door/close')
-
 class CoverEntity(Entity):
     def turn_on(self):
         self._call_service('cover/open_cover')
@@ -289,22 +292,35 @@ class CoverEntity(Entity):
         self._call_service('cover/close_cover')
 
 
-class LockEntity(Entity):
+class GarageDoorEntity(Entity):
     def turn_on(self):
-        self._call_service('lock/lock')
+        self._call_service('garage_door/open')
 
     def turn_off(self):
-        self._call_service('lock/unlock')
+        self._call_service('garage_door/close')
 
 
-class ScriptEntity(Entity):
+# TODO: Consider the step when you get/set the percent.
+class InputSliderEntity(Entity):
+    def turn_on(self):
+        raise UnsupportedOperationError()
+
     def turn_off(self):
-        self.turn_on()
+        raise UnsupportedOperationError()
 
+    def get_percentage(self):
+        state = self.ha.get('states/' + self.entity_id)
+        min_value = float(state['attributes']['min'])
+        max_value = float(state['attributes']['max'])
+        current_value = float(state['state'])
+        return (current_value / (max_value - min_value)) * 100.0
 
-class SceneEntity(Entity):
-    def turn_off(self):
-        self.turn_on()
+    def set_percentage(self, val):
+        state = self.ha.get('states/' + self.entity_id)
+        min_value = float(state['attributes']['min'])
+        max_value = float(state['attributes']['max'])
+        new_value = (val / 100.0) * (max_value - min_value)
+        self._call_service('input_slider/select_value', {'value': new_value})
 
 
 class LightEntity(Entity):
@@ -318,6 +334,14 @@ class LightEntity(Entity):
         self._call_service('light/turn_on', {'brightness': brightness})
 
 
+class LockEntity(Entity):
+    def turn_on(self):
+        self._call_service('lock/lock')
+
+    def turn_off(self):
+        self._call_service('lock/unlock')
+
+
 class MediaPlayerEntity(Entity):
     def get_percentage(self):
         state = self.ha.get('states/' + self.entity_id)
@@ -329,16 +353,27 @@ class MediaPlayerEntity(Entity):
         self._call_service('media_player/volume_set', {'volume_level': vol})
 
 
+class SceneEntity(Entity):
+    def turn_off(self):
+        self.turn_on()
+
+
+class ScriptEntity(Entity):
+    def turn_off(self):
+        self.turn_on()
+
+
 def mk_entity(ha, payload):
     entity_id = context(payload)['entity_id']
     entity_domain = entity_id.split('.', 1)[0]
 
-    domains = {'garage_door': GarageDoorEntity,
-               'cover': CoverEntity,
-               'lock': LockEntity,
-               'script': ScriptEntity,
-               'scene': SceneEntity,
+    domains = {'cover': CoverEntity,
+               'garage_door': GarageDoorEntity,
+               'input_slider': InputSliderEntity,
                'light': LightEntity,
-               'media_player': MediaPlayerEntity}
+               'lock': LockEntity,
+               'media_player': MediaPlayerEntity,
+               'scene': SceneEntity,
+               'script': ScriptEntity}
 
     return domains.setdefault(entity_domain, Entity)(ha, entity_id)
