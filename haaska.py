@@ -292,7 +292,7 @@ def handle_temperature_adj(ha, payload, op):
     current = e.get_temperature()
     new = op(current, payload['deltaTemperature']['value'])
 
-    min_temp = float(state['attributes']['in_temp'])
+    min_temp = float(state['attributes']['min_temp'])
     max_temp = float(state['attributes']['max_temp'])
     if current != min_temp and current != max_temp:
         if new < min_temp:
@@ -404,7 +404,7 @@ class ClimateEntity(Entity):
         heating_mode = 'AUTO'
         if state['attributes']['away_mode'] == 'on':
             heating_mode = 'AWAY'
-        return {'target_temperature': {'value': target_temp}, 'mode': {'value': heating_mode}}
+        return {'targetTemperature': {'value': target_temp}, 'mode': {'value': heating_mode}}
 
     def get_temperature(self):
         state = self.ha.get('states/' + self.entity_id)
