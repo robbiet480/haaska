@@ -135,7 +135,7 @@ def discover_appliances(ha):
     def is_supported_entity(x):
         allowed_entities = ['group', 'input_boolean', 'light', 'media_player',
                             'scene', 'script', 'switch', 'garage_door', 'lock',
-                            'cover']
+                            'cover', 'climate']
         if 'ha_allowed_entities' in cfg:
             allowed_entities = cfg['ha_allowed_entities']
         return entity_domain(x) in allowed_entities
@@ -145,7 +145,8 @@ def discover_appliances(ha):
         return 'haaska_hidden' in attr and attr['haaska_hidden']
 
     def mk_appliance(x):
-        dimmable = entity_domain(x) in ('light', 'group', 'media_player')
+        dimmable = entity_domain(x) in ('light', 'group', 'media_player') 
+        climate = entity_domain(x) in ('climate')
         o = {}
         # this needs to be unique and has limitations on allowed characters:
         o['applianceId'] = sha1(x['entity_id']).hexdigest()
@@ -170,6 +171,10 @@ def discover_appliances(ha):
         if dimmable:
             o['actions'] += ['incrementPercentage', 'decrementPercentage',
                              'setPercentage']
+        if climate:
+            o['actions'] += ['incrementTargetTemperature', 'decrementTargetTemperature',
+                             'setTargetTemperature']
+
         o['additionalApplianceDetails'] = {'entity_id': x['entity_id'],
                                            'dimmable': dimmable}
         return o
@@ -188,8 +193,12 @@ def control_response(name):
                            'messageId': str(uuid4()),
                            'payloadVersion': '2'}
             try:
-                func(ha, payload)
-                r['payload'] = {'success': True}
+                res = func(ha, payload)
+                if res is None:
+                    r['payload'] = {}
+                else:
+                    r['payload'] = res
+                r['payload']['success'] = True
                 return r
             except SmartHomeException as e:
                 return e.r
@@ -256,6 +265,60 @@ def handle_increment_percentage(ha, payload):
 @control_response('DecrementPercentageConfirmation')
 def handle_decrement_percentage(ha, payload):
     handle_percentage_adj(ha, payload, operator.sub)
+
+
+@handle('SetTargetTemperatureRequest')
+@control_response('SetTargetTemperatureConfirmation')
+def handle_set_temperature(ha, payload):
+    e = mk_entity(ha, payload)
+    old_state = e.get_state()
+    state = ha.get('states/' + e.entity_id)
+    target_temp = payload['targetTemperature']['value']
+    if float(state['attributes']['min_temp']) < target_temp < float(state['attributes']['max_temp']):
+        e.set_temperature(target_temp)
+    else:
+        raise ValueOutOfRangeError(float(state['attributes']['min_temp']), float(state['attributes']['max_temp']))
+
+    return {'previousState': old_state,
+            'targetTemperature': {'value': target_temp},
+            'temperatureMode': {'value': 'AUTO'}}
+
+
+def handle_temperature_adj(ha, payload, op):
+    e = mk_entity(ha, payload)
+    old_state = e.get_state()
+
+    state = ha.get('states/' + e.entity_id)
+    current = e.get_temperature()
+    new = op(current, payload['deltaTemperature']['value'])
+
+    min_temp = float(state['attributes']['in_temp'])
+    max_temp = float(state['attributes']['max_temp'])
+    if current != min_temp and current != max_temp:
+        if new < min_temp:
+            new = min_temp
+        elif new > max_temp:
+            new = max_temp
+
+    if new > max_temp or new < min_temp:
+        raise ValueOutOfRangeError(min_temp, max_temp)
+    e.set_temperature(new)
+    return {'previousState': old_state,
+            'targetTemperature': {'value': new},
+            'temperatureMode': {'value': 'AUTO'}}
+
+
+@handle('IncrementTargetTemperatureRequest')
+@control_response('IncrementTargetTemperatureConfirmation')
+def handle_increment_percentage(ha, payload):
+    return handle_temperature_adj(ha, payload, operator.add)
+
+
+@handle('DecrementTargetTemperatureRequest')
+@control_response('DecrementTargetTemperatureConfirmation')
+def handle_decrement_percentage(ha, payload):
+    handle_temperature_adj(ha, payload, operator.sub)
+
 
 
 class Entity(object):
@@ -328,6 +391,29 @@ class MediaPlayerEntity(Entity):
         vol = val / 100.0
         self._call_service('media_player/volume_set', {'volume_level': vol})
 
+class ClimateEntity(Entity):
+    def turn_on(self):
+        self._call_service('climate/set_away_mode', {'away_mode': False})
+
+    def turn_off(self):
+        self._call_service('climate/set_away_mode', {'away_mode': True})
+
+    def get_state(self):
+        state = self.ha.get('states/' + self.entity_id)
+        target_temp = state['attributes']['temperature']
+        heating_mode = 'AUTO'
+        if state['attributes']['away_mode'] == 'on':
+            heating_mode = 'AWAY'
+        return {'target_temperature': {'value': target_temp}, 'mode': {'value': heating_mode}}
+
+    def get_temperature(self):
+        state = self.ha.get('states/' + self.entity_id)
+        temp = state['attributes']['temperature']
+        return temp
+
+    def set_temperature(self, val):
+        self._call_service('climate/set_temperature', {'temperature': val})
+
 
 def mk_entity(ha, payload):
     entity_id = context(payload)['entity_id']
@@ -339,6 +425,7 @@ def mk_entity(ha, payload):
                'script': ScriptEntity,
                'scene': SceneEntity,
                'light': LightEntity,
-               'media_player': MediaPlayerEntity}
+               'media_player': MediaPlayerEntity,
+               'climate': ClimateEntity}
 
     return domains.setdefault(entity_domain, Entity)(ha, entity_id)
