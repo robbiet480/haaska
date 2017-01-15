@@ -133,6 +133,8 @@ def discover_appliances(ha):
         return x['entity_id'].split('.', 1)[0]
 
     def is_supported_entity(x):
+        if 'friendly_name' not in x['attributes'] and 'haaska_name' not in x['attributes']:
+            return False
         allowed_entities = ['group', 'input_boolean', 'light', 'media_player',
                             'scene', 'script', 'switch', 'garage_door', 'lock',
                             'cover']
