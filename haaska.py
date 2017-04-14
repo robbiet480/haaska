@@ -139,11 +139,13 @@ def discover_appliances(ha):
         return x['entity_id'].split('.', 1)[0]
 
     def is_supported_entity(x):
-        if 'friendly_name' not in x['attributes'] and 'haaska_name' not in x['attributes']:
+        if ('friendly_name' not in x['attributes'] and
+                'haaska_name' not in x['attributes']):
             return False
-        allowed_entities = ['group', 'input_boolean', 'light', 'media_player',
-                            'scene', 'script', 'switch', 'garage_door', 'lock',
-                            'cover', 'climate']
+        allowed_entities = ['automation', 'climate', 'cover', 'garage_door',
+                            'group', 'input_boolean', 'input_slider', 'light',
+                            'lock', 'media_player', 'scene', 'script',
+                            'switch']
         if 'ha_allowed_entities' in cfg:
             allowed_entities = cfg['ha_allowed_entities']
         return entity_domain(x) in allowed_entities
@@ -316,10 +318,12 @@ def handle_set_temperature(ha, payload):
     old_state = e.get_state()
     state = ha.get('states/' + e.entity_id)
     target_temp = payload['targetTemperature']['value']
-    if float(state['attributes']['min_temp']) < target_temp < float(state['attributes']['max_temp']):
+    if (float(state['attributes']['min_temp']) <
+            target_temp < float(state['attributes']['max_temp'])):
         e.set_temperature(target_temp)
     else:
-        raise ValueOutOfRangeError(float(state['attributes']['min_temp']), float(state['attributes']['max_temp']))
+        raise ValueOutOfRangeError(float(state['attributes']['min_temp']),
+                                   float(state['attributes']['max_temp']))
 
     return {'previousState': old_state,
             'targetTemperature': {'value': target_temp},
@@ -352,15 +356,14 @@ def handle_temperature_adj(ha, payload, op):
 
 @handle('IncrementTargetTemperatureRequest')
 @control_response('IncrementTargetTemperatureConfirmation')
-def handle_increment_percentage(ha, payload):
+def handle_temperature_increment(ha, payload):
     return handle_temperature_adj(ha, payload, operator.add)
 
 
 @handle('DecrementTargetTemperatureRequest')
 @control_response('DecrementTargetTemperatureConfirmation')
-def handle_decrement_percentage(ha, payload):
+def handle_decrement_temperature(ha, payload):
     handle_temperature_adj(ha, payload, operator.sub)
-
 
 
 class Entity(object):
@@ -443,6 +446,22 @@ class LockEntity(Entity):
         return state['state']
 
 
+class InputSliderEntity(Entity):
+    def get_percentage(self):
+        state = self.ha.get('states/' + self.entity_id)
+        min_value = float(state['attributes']['min'])
+        max_value = float(state['attributes']['max'])
+        current_value = float(state['state'])
+        return (current_value / (max_value - min_value)) * 100.0
+
+    def set_percentage(self, val):
+        state = self.ha.get('states/' + self.entity_id)
+        min_value = float(state['attributes']['min'])
+        max_value = float(state['attributes']['max'])
+        new_value = (val / 100.0) * (max_value - min_value)
+        self._call_service('input_slider/select_value', {'value': new_value})
+
+
 class ScriptEntity(ToggleEntity):
     def turn_off(self):
         self.turn_on()
@@ -483,6 +502,7 @@ class MediaPlayerEntity(ToggleEntity):
         vol = val / 100.0
         self._call_service('media_player/volume_set', {'volume_level': vol})
 
+
 class ClimateEntity(Entity):
     def turn_on(self):
         self._call_service('climate/set_away_mode', {'away_mode': False})
@@ -496,7 +516,8 @@ class ClimateEntity(Entity):
         heating_mode = 'AUTO'
         if state['attributes']['away_mode'] == 'on':
             heating_mode = 'AWAY'
-        return {'targetTemperature': {'value': target_temp}, 'mode': {'value': heating_mode}}
+        return {'targetTemperature': {'value': target_temp},
+                'mode': {'value': heating_mode}}
 
     def get_temperature(self):
         state = self.ha.get('states/' + self.entity_id)
@@ -510,14 +531,19 @@ class ClimateEntity(Entity):
 def mk_entity(ha, entity_id, supported_features):
     entity_domain = entity_id.split('.', 1)[0]
 
-    domains = {'garage_door': GarageDoorEntity,
-               'cover': CoverEntity,
-               'lock': LockEntity,
-               'script': ScriptEntity,
-               'scene': SceneEntity,
-               'light': LightEntity,
-               'media_player': MediaPlayerEntity,
-               'climate': ClimateEntity}
+    domains = {
+                'cover': CoverEntity,
+                'garage_door': GarageDoorEntity,
+                'input_slider': InputSliderEntity,
+                'light': LightEntity,
+                'lock': LockEntity,
+                'media_player': MediaPlayerEntity,
+                'scene': SceneEntity,
+                'light': LightEntity,
+                'media_player': MediaPlayerEntity,
+                'climate': ClimateEntity,
+                'script': ScriptEntity
+            }
 
     return domains.setdefault(entity_domain, ToggleEntity)(ha, entity_id,
                                                            supported_features)
