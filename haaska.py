@@ -532,6 +532,7 @@ def mk_entity(ha, entity_id, supported_features):
     entity_domain = entity_id.split('.', 1)[0]
 
     domains = {
+                'climate': ClimateEntity,
                 'cover': CoverEntity,
                 'garage_door': GarageDoorEntity,
                 'input_slider': InputSliderEntity,
@@ -539,9 +540,6 @@ def mk_entity(ha, entity_id, supported_features):
                 'lock': LockEntity,
                 'media_player': MediaPlayerEntity,
                 'scene': SceneEntity,
-                'light': LightEntity,
-                'media_player': MediaPlayerEntity,
-                'climate': ClimateEntity,
                 'script': ScriptEntity
             }
 
