@@ -143,7 +143,7 @@ def discover_appliances(ha):
             return False
         allowed_entities = ['group', 'input_boolean', 'light', 'media_player',
                             'scene', 'script', 'switch', 'garage_door', 'lock',
-                            'cover']
+                            'cover', 'climate']
         if 'ha_allowed_entities' in cfg:
             allowed_entities = cfg['ha_allowed_entities']
         return entity_domain(x) in allowed_entities
@@ -309,6 +309,60 @@ def handle_set_color_temperature(ha, payload):
     e.set_color_temperature(payload['colorTemperature']['value'])
 
 
+@handle('SetTargetTemperatureRequest')
+@control_response('SetTargetTemperatureConfirmation')
+def handle_set_temperature(ha, payload):
+    e = mk_entity(ha, payload)
+    old_state = e.get_state()
+    state = ha.get('states/' + e.entity_id)
+    target_temp = payload['targetTemperature']['value']
+    if float(state['attributes']['min_temp']) < target_temp < float(state['attributes']['max_temp']):
+        e.set_temperature(target_temp)
+    else:
+        raise ValueOutOfRangeError(float(state['attributes']['min_temp']), float(state['attributes']['max_temp']))
+
+    return {'previousState': old_state,
+            'targetTemperature': {'value': target_temp},
+            'temperatureMode': {'value': 'AUTO'}}
+
+
+def handle_temperature_adj(ha, payload, op):
+    e = mk_entity(ha, payload)
+    old_state = e.get_state()
+
+    state = ha.get('states/' + e.entity_id)
+    current = e.get_temperature()
+    new = op(current, payload['deltaTemperature']['value'])
+
+    min_temp = float(state['attributes']['min_temp'])
+    max_temp = float(state['attributes']['max_temp'])
+    if current != min_temp and current != max_temp:
+        if new < min_temp:
+            new = min_temp
+        elif new > max_temp:
+            new = max_temp
+
+    if new > max_temp or new < min_temp:
+        raise ValueOutOfRangeError(min_temp, max_temp)
+    e.set_temperature(new)
+    return {'previousState': old_state,
+            'targetTemperature': {'value': new},
+            'temperatureMode': {'value': 'AUTO'}}
+
+
+@handle('IncrementTargetTemperatureRequest')
+@control_response('IncrementTargetTemperatureConfirmation')
+def handle_increment_percentage(ha, payload):
+    return handle_temperature_adj(ha, payload, operator.add)
+
+
+@handle('DecrementTargetTemperatureRequest')
+@control_response('DecrementTargetTemperatureConfirmation')
+def handle_decrement_percentage(ha, payload):
+    handle_temperature_adj(ha, payload, operator.sub)
+
+
+
 class Entity(object):
     def __init__(self, ha, entity_id, supported_features):
         self.ha = ha
@@ -344,6 +398,11 @@ class Entity(object):
                 actions.append('setColorRequest')
             if self.supported_features & LIGHT_SUPPORT_COLOR_TEMP:
                 actions.append('setColorTemperature')
+
+        if self.entity_domain == "climate":
+            actions.append('incrementTargetTemperature')
+            actions.append('decrementTargetTemperature')
+            actions.append('setTargetTemperature')
 
         return actions
 
@@ -424,6 +483,29 @@ class MediaPlayerEntity(ToggleEntity):
         vol = val / 100.0
         self._call_service('media_player/volume_set', {'volume_level': vol})
 
+class ClimateEntity(Entity):
+    def turn_on(self):
+        self._call_service('climate/set_away_mode', {'away_mode': False})
+
+    def turn_off(self):
+        self._call_service('climate/set_away_mode', {'away_mode': True})
+
+    def get_state(self):
+        state = self.ha.get('states/' + self.entity_id)
+        target_temp = state['attributes']['temperature']
+        heating_mode = 'AUTO'
+        if state['attributes']['away_mode'] == 'on':
+            heating_mode = 'AWAY'
+        return {'targetTemperature': {'value': target_temp}, 'mode': {'value': heating_mode}}
+
+    def get_temperature(self):
+        state = self.ha.get('states/' + self.entity_id)
+        temp = state['attributes']['temperature']
+        return temp
+
+    def set_temperature(self, val):
+        self._call_service('climate/set_temperature', {'temperature': val})
+
 
 def mk_entity(ha, entity_id, supported_features):
     entity_domain = entity_id.split('.', 1)[0]
@@ -434,7 +516,8 @@ def mk_entity(ha, entity_id, supported_features):
                'script': ScriptEntity,
                'scene': SceneEntity,
                'light': LightEntity,
-               'media_player': MediaPlayerEntity}
+               'media_player': MediaPlayerEntity,
+               'climate': ClimateEntity}
 
     return domains.setdefault(entity_domain, ToggleEntity)(ha, entity_id,
                                                            supported_features)
