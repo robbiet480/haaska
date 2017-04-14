@@ -142,10 +142,10 @@ def discover_appliances(ha):
         if ('friendly_name' not in x['attributes'] and
                 'haaska_name' not in x['attributes']):
             return False
-        allowed_entities = ['automation', 'climate', 'cover', 'garage_door',
-                            'group', 'input_boolean', 'input_slider', 'light',
-                            'lock', 'media_player', 'scene', 'script',
-                            'switch']
+        allowed_entities = ['automation', 'climate', 'cover', 'fan',
+                            'garage_door', 'group', 'input_boolean',
+                            'input_slider', 'light', 'lock',
+                            'media_player', 'scene', 'script', 'switch']
         if 'ha_allowed_entities' in cfg:
             allowed_entities = cfg['ha_allowed_entities']
         return entity_domain(x) in allowed_entities
@@ -528,12 +528,37 @@ class ClimateEntity(Entity):
         self._call_service('climate/set_temperature', {'temperature': val})
 
 
+class FanEntity(ToggleEntity):
+    def get_percentage(self):
+        state = self.ha.get('states/' + self.entity_id)
+        speed = state['attributes']['speed']
+        if speed == "off":
+            return 0
+        elif speed == "low":
+            return 33
+        elif speed == "medium":
+            return 66
+        elif speed == "high":
+            return 100
+
+    def set_percentage(self, val):
+        speed = "off"
+        if val <= 33:
+            speed = "low"
+        elif val <= 66:
+            speed = "medium"
+        elif val <= 100:
+            speed = "high"
+        self._call_service('fan/set_speed', {'speed': speed})
+
+
 def mk_entity(ha, entity_id, supported_features):
     entity_domain = entity_id.split('.', 1)[0]
 
     domains = {
                 'climate': ClimateEntity,
                 'cover': CoverEntity,
+                'fan': FanEntity,
                 'garage_door': GarageDoorEntity,
                 'input_slider': InputSliderEntity,
                 'light': LightEntity,
