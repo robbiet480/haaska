@@ -149,13 +149,7 @@ def discover_appliances(ha):
         if ('friendly_name' not in x['attributes'] and
                 'haaska_name' not in x['attributes']):
             return False
-        allowed_entities = ['automation', 'climate', 'cover', 'fan',
-                            'garage_door', 'group', 'input_boolean',
-                            'input_slider', 'light', 'lock',
-                            'media_player', 'scene', 'script', 'switch']
-        if 'ha_allowed_entities' in cfg:
-            allowed_entities = cfg['ha_allowed_entities']
-        return entity_domain(x) in allowed_entities
+        return entity_domain(x) in ha.allowed_domains
 
     def is_skipped_entity(x):
         attr = x['attributes']
