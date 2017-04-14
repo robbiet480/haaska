@@ -7,9 +7,14 @@ haaska implements a skill adapter to bridge a [Home Assistant](https://home-assi
 
 | Type           | On/Off Supported? | Dim Supported? |
 |----------------|-------------------|----------------|
-| Cover          | Yes               | Yes            |
+| Automations    | Yes               | No             |
+| Climate        | Yes               | Yes            |
+| Covers         | Yes               | Yes            |
+| Fans           | Yes               | Yes            |
+| Garage Doors   | Yes               | Yes            |
 | Groups         | Yes               | No             |
 | Input Booleans | Yes               | No             |
+| Input Slider   | Yes               | Yes            |
 | Lights         | Yes               | Yes            |
 | Locks          | Lock/Unlock       | No             |
 | Media Players  | Yes               | Yes (volume)   |
@@ -47,12 +52,12 @@ haaska implements a skill adapter to bridge a [Home Assistant](https://home-assi
 
 ### Config Values
 
-| Key                   | Example Value                                                                                                      | Required? | Notes                                                                                        |
-|-----------------------|--------------------------------------------------------------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------|
-| `url`.                | `https://demo.home-assistant.io.`.                                                                                 | **Yes**   | The hostname of your Home Assistant instance. **This must not have a trailing slash**.       |
-| `password `           | `securepassword`                                                                                                   | **Yes**   | The API password of your Home Assistant instance.                                            |
-| `certificate`         | `mycert.crt`                                                                                                       | No        | The name of your self-signed certificate located in the `config/` directory.                 |
-| `allowed_domains`     | `["cover", "garage_door", "group", "input_boolean", "light", "lock", "media_player", "scene", "script", "switch"]` | No        | A JSON array of entity types to expose to Alexa. If not provided, the example value is used. |
+| Key                   | Example Value                                                                                                                                                      | Required? | Notes                                                                                        |
+|-----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------|
+| `url`.                | `https://demo.home-assistant.io.`.                                                                                                                                 | **Yes**   | The hostname of your Home Assistant instance. **This must not have a trailing slash**.       |
+| `password `           | `securepassword`                                                                                                                                                   | **Yes**   | The API password of your Home Assistant instance.                                            |
+| `certificate`         | `mycert.crt`                                                                                                                                                       | No        | The name of your self-signed certificate located in the `config/` directory.                 |
+| `allowed_domains`     | `["automation", "climate", "cover", "fan", "garage_door", "group", "input_boolean", "input_slider", "light", "lock", "media_player", "scene", "script", "switch"]` | No        | A JSON array of entity types to expose to Alexa. If not provided, the example value is used. |
 
 ## Usage
 After completing setup of haaska, tell Alexa: "Alexa, discover my devices". If there is an issue you can go to `Menu / Smart Home` in the [web](http://echo.amazon.com/#smart-home) or mobile app and have Alexa forget all devices and then do the discovery again.
