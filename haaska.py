@@ -67,8 +67,9 @@ class HomeAssistant(object):
         if 'certificate' in config:
             self.cert = config['certificate']
 
-        self.allowed_domains = ['cover', 'garage_door', 'group',
-                                'input_boolean', 'light', 'lock',
+        self.allowed_domains = ['automation', 'climate', 'cover', 'fan',
+                                'garage_door', 'group', 'input_boolean',
+                                'input_slider', 'light', 'lock',
                                 'media_player', 'scene', 'script', 'switch']
         if 'allowed_domains' in config:
             self.allowed_domains = config['allowed_domains']
