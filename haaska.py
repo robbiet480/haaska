@@ -142,7 +142,8 @@ def discover_appliances(ha):
 
     def is_skipped_entity(x):
         attr = x['attributes']
-        return 'haaska_hidden' in attr and attr['haaska_hidden']
+        return (('haaska_hidden' in attr and attr['haaska_hidden']) or
+                ('hidden' in attr and attr['hidden']))
 
     def mk_appliance(x):
         entity = mk_entity(ha, x['entity_id'])
