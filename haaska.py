@@ -23,7 +23,6 @@
 import json
 import operator
 import requests
-import colorsys
 from hashlib import sha1
 from uuid import uuid4
 
@@ -154,7 +153,8 @@ def discover_appliances(ha):
 
     def is_skipped_entity(x):
         attr = x['attributes']
-        return 'haaska_hidden' in attr and attr['haaska_hidden']
+        return (('haaska_hidden' in attr and attr['haaska_hidden']) or
+                ('hidden' in attr and attr['hidden']))
 
     def mk_appliance(x):
         features = 0
@@ -304,6 +304,7 @@ def handle_set_color(ha, payload):
     e = mk_entity(ha, payload_to_entity(payload), supported_features(payload))
     e.set_color(payload['color']['hue'], payload['color']['saturation'],
                 payload['color']['brightness'])
+    return {'achievedState': {'color': payload['color']}}
 
 
 @handle('SetColorTemperatureRequest')
@@ -311,61 +312,106 @@ def handle_set_color(ha, payload):
 def handle_set_color_temperature(ha, payload):
     e = mk_entity(ha, payload_to_entity(payload), supported_features(payload))
     e.set_color_temperature(payload['colorTemperature']['value'])
+    return {'achievedState': {'colorTemperature': payload['colorTemperature']}}
+
+
+def convert_temp(temp, from_unit='°C', to_unit='°C'):
+    if temp is None or from_unit == to_unit:
+        return temp
+    if from_unit == '°C':
+        return temp * 1.8 + 32
+    else:
+        return (temp - 32) / 1.8
+
+
+@handle('GetTemperatureReadingRequest')
+def handle_get_temperature_reading(ha, payload):
+    e = mk_entity(ha, payload_to_entity(payload), supported_features(payload))
+    temperature = e.get_current_temperature()
+
+    r = {}
+    r['header'] = {'namespace': 'Alexa.ConnectedHome.Query',
+                   'messageId': str(uuid4()),
+                   'name': 'GetTemperatureReadingResponse',
+                   'payloadVersion': '2'}
+    r['payload'] = {'temperatureReading': {'value': temperature}}
+    return r
+
+
+@handle('GetTargetTemperatureRequest')
+def handle_get_target_temperature(ha, payload):
+    e = mk_entity(ha, payload_to_entity(payload), supported_features(payload))
+    temperature, mode = e.get_temperature()
+
+    r = {}
+    r['header'] = {'namespace': 'Alexa.ConnectedHome.Query',
+                   'messageId': str(uuid4()),
+                   'name': 'GetTargetTemperatureResponse',
+                   'payloadVersion': '2'}
+    r['payload'] = {'targetTemperature': {'value': temperature},
+                    'temperatureMode': {'value': mode}}
+    if mode not in ['AUTO', 'COOL', 'HEAT', 'OFF']:
+        r['payload']['temperatureMode'] = {
+            'value': 'CUSTOM',
+            'friendlyName': mode.replace('_', ' ').title()
+        }
+
+    return r
+
+
+def handle_temperature_adj(ha, payload, op=None):
+    e = mk_entity(ha, payload_to_entity(payload), supported_features(payload))
+    state = ha.get('states/' + e.entity_id)
+    unit = state['attributes']['unit_of_measurement']
+    min_temp = convert_temp(state['attributes']['min_temp'], unit)
+    max_temp = convert_temp(state['attributes']['max_temp'], unit)
+
+    temperature, mode = e.get_temperature(state)
+
+    if op is not None and 'deltaTemperature' in payload:
+        new = op(temperature, payload['deltaTemperature']['value'])
+        # Clamp the allowed temperature for relative adjustments
+        if temperature != max_temp and temperature != min_temp:
+            if new < min_temp:
+                new = min_temp
+            elif new > max_temp:
+                new = max_temp
+    else:
+        new = payload['targetTemperature']['value']
+
+    if new > max_temp or new < min_temp:
+        raise ValueOutOfRangeError(min_temp, max_temp)
+
+    # Only 3 allowed values for mode in this response
+    if mode not in ['AUTO', 'COOL', 'HEAT']:
+        current = e.get_current_temperature(state)
+        mode = 'COOL' if current >= new else 'HEAT'
+
+    e.set_temperature(new, mode.lower(), state)
+
+    return {'targetTemperature': {'value': new},
+            'temperatureMode': {'value': mode},
+            'previousState': {
+                'targetTemperature': {'value': temperature},
+                'mode': {'value': mode}}}
 
 
 @handle('SetTargetTemperatureRequest')
 @control_response('SetTargetTemperatureConfirmation')
-def handle_set_temperature(ha, payload):
-    e = mk_entity(ha, payload)
-    old_state = e.get_state()
-    state = ha.get('states/' + e.entity_id)
-    target_temp = payload['targetTemperature']['value']
-    if (float(state['attributes']['min_temp']) <
-            target_temp < float(state['attributes']['max_temp'])):
-        e.set_temperature(target_temp)
-    else:
-        raise ValueOutOfRangeError(float(state['attributes']['min_temp']),
-                                   float(state['attributes']['max_temp']))
-
-    return {'previousState': old_state,
-            'targetTemperature': {'value': target_temp},
-            'temperatureMode': {'value': 'AUTO'}}
-
-
-def handle_temperature_adj(ha, payload, op):
-    e = mk_entity(ha, payload)
-    old_state = e.get_state()
-
-    state = ha.get('states/' + e.entity_id)
-    current = e.get_temperature()
-    new = op(current, payload['deltaTemperature']['value'])
-
-    min_temp = float(state['attributes']['min_temp'])
-    max_temp = float(state['attributes']['max_temp'])
-    if current != min_temp and current != max_temp:
-        if new < min_temp:
-            new = min_temp
-        elif new > max_temp:
-            new = max_temp
-
-    if new > max_temp or new < min_temp:
-        raise ValueOutOfRangeError(min_temp, max_temp)
-    e.set_temperature(new)
-    return {'previousState': old_state,
-            'targetTemperature': {'value': new},
-            'temperatureMode': {'value': 'AUTO'}}
+def handle_set_target_temperature(ha, payload):
+    return handle_temperature_adj(ha, payload)
 
 
 @handle('IncrementTargetTemperatureRequest')
 @control_response('IncrementTargetTemperatureConfirmation')
-def handle_temperature_increment(ha, payload):
+def handle_increment_target_temperature(ha, payload):
     return handle_temperature_adj(ha, payload, operator.add)
 
 
 @handle('DecrementTargetTemperatureRequest')
 @control_response('DecrementTargetTemperatureConfirmation')
-def handle_decrement_temperature(ha, payload):
-    handle_temperature_adj(ha, payload, operator.sub)
+def handle_decrement_target_temperature(ha, payload):
+    return handle_temperature_adj(ha, payload, operator.sub)
 
 
 class Entity(object):
@@ -404,10 +450,16 @@ class Entity(object):
             if self.supported_features & LIGHT_SUPPORT_COLOR_TEMP:
                 actions.append('setColorTemperature')
 
-        if self.entity_domain == "climate":
+        if hasattr(self, 'get_current_temperature'):
+            actions.append('getTemperatureReading')
+
+        if hasattr(self, 'set_temperature'):
+            actions.append('setTargetTemperature')
+
+        if hasattr(self, 'get_temperature'):
+            actions.append('getTargetTemperature')
             actions.append('incrementTargetTemperature')
             actions.append('decrementTargetTemperature')
-            actions.append('setTargetTemperature')
 
         return actions
 
@@ -485,13 +537,12 @@ class LightEntity(ToggleEntity):
         self._call_service('light/turn_on', {'brightness': brightness})
 
     def set_color(self, hue, saturation, brightness):
-        red, green, blue = colorsys.hsv_to_rgb(hue, saturation, brightness)
-        rgb = [int(red), int(green), int(blue)]
+        rgb = hsb2rgb([hue, saturation * 100, brightness * 100])
         self._call_service('light/turn_on', {'rgb_color': rgb})
 
     def set_color_temperature(self, val):
-        color_temp = (val / 1000000)
-        self._call_service('light/turn_on', {'color_temp': color_temp})
+        self._call_service('light/turn_on',
+                           {'color_temp': (1000000 / val)})
 
 
 class MediaPlayerEntity(ToggleEntity):
@@ -507,27 +558,46 @@ class MediaPlayerEntity(ToggleEntity):
 
 class ClimateEntity(Entity):
     def turn_on(self):
-        self._call_service('climate/set_away_mode', {'away_mode': False})
+        state = self.ha.get('states/' + self.entity_id)
+        current = self.get_current_temperature(state)
+        temperature, mode = self.get_temperature(state)
+        if temperature is None:
+            mode = 'auto'
+        else:
+            mode = 'cool' if current >= temperature else 'heat'
+        self._call_service('climate/set_operation_mode',
+                           {'operation_mode': mode})
 
     def turn_off(self):
-        self._call_service('climate/set_away_mode', {'away_mode': True})
+        self._call_service('climate/set_operation_mode',
+                           {'operation_mode': 'off'})
 
-    def get_state(self):
-        state = self.ha.get('states/' + self.entity_id)
-        target_temp = state['attributes']['temperature']
-        heating_mode = 'AUTO'
-        if state['attributes']['away_mode'] == 'on':
-            heating_mode = 'AWAY'
-        return {'targetTemperature': {'value': target_temp},
-                'mode': {'value': heating_mode}}
+    def get_current_temperature(self, state=None):
+        if not state:
+            state = self.ha.get('states/' + self.entity_id)
 
-    def get_temperature(self):
-        state = self.ha.get('states/' + self.entity_id)
-        temp = state['attributes']['temperature']
-        return temp
+        return convert_temp(state['attributes']['current_temperature'],
+                            state['attributes']['unit_of_measurement'])
 
-    def set_temperature(self, val):
-        self._call_service('climate/set_temperature', {'temperature': val})
+    def get_temperature(self, state=None):
+        if not state:
+            state = self.ha.get('states/' + self.entity_id)
+        temperature = convert_temp(state['attributes']['temperature'],
+                                   state['attributes']['unit_of_measurement'])
+        mode = state['state'].replace('idle', 'off').upper()
+        return (temperature, mode)
+
+    def set_temperature(self, val, mode=None, state=None):
+        if not state:
+            state = self.ha.get('states/' + self.entity_id)
+        temperature = convert_temp(
+            val,
+            to_unit=state['attributes']['unit_of_measurement'])
+        data = {'temperature': temperature}
+        if mode:
+            data['operation_mode'] = mode
+
+        self._call_service('climate/set_temperature', data)
 
 
 class FanEntity(ToggleEntity):
@@ -572,3 +642,58 @@ def mk_entity(ha, entity_id, supported_features):
 
     return domains.setdefault(entity_domain, ToggleEntity)(ha, entity_id,
                                                            supported_features)
+
+
+def hsb2rgb(hsb):
+    '''
+    Transforms a hsb array to the corresponding rgb tuple
+    In: hsb = array of three ints (h between 0 and 360, s and v between 0-100)
+    Out: rgb = array of three ints (between 0 and 255)
+    '''
+    H = float(hsb[0] / 360.0)
+    S = float(hsb[1] / 100.0)
+    B = float(hsb[2] / 100.0)
+
+    if (S == 0):
+        R = int(round(B * 255))
+        G = int(round(B * 255))
+        B = int(round(B * 255))
+    else:
+        var_h = H * 6
+        if (var_h == 6):
+            var_h = 0  # H must be < 1
+        var_i = int(var_h)
+        var_1 = B * (1 - S)
+        var_2 = B * (1 - S * (var_h - var_i))
+        var_3 = B * (1 - S * (1 - (var_h - var_i)))
+
+        if (var_i == 0):
+            var_r = B
+            var_g = var_3
+            var_b = var_1
+        elif (var_i == 1):
+            var_r = var_2
+            var_g = B
+            var_b = var_1
+        elif (var_i == 2):
+            var_r = var_1
+            var_g = B
+            var_b = var_3
+        elif (var_i == 3):
+            var_r = var_1
+            var_g = var_2
+            var_b = B
+        elif (var_i == 4):
+            var_r = var_3
+            var_g = var_1
+            var_b = B
+        else:
+            var_r = B
+            var_g = var_1
+            var_b = var_2
+
+        R = int(round(var_r * 255))
+        G = int(round(var_g * 255))
+        B = int(round(var_b * 255))
+
+    return [R, G, B]
