@@ -146,6 +146,9 @@ def discover_appliances(ha):
         return x['entity_id'].split('.', 1)[0]
 
     def is_supported_entity(x):
+        if 'friendly_name' not in x['attributes'] and \
+                'haaska_name' not in x['attributes']:
+            return False
         return entity_domain(x) in ha.allowed_domains
 
     def is_skipped_entity(x):
