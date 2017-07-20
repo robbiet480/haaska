@@ -21,6 +21,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import os
 import json
 import logging
 import operator
@@ -41,9 +42,13 @@ class HomeAssistant(object):
     def __init__(self, config):
         self.config = config
         self.url = config.url.rstrip('/')
+        agent_str = 'Home Assistant Alexa Smart Home Skill - %s - %s'
+        agent_fmt = agent_str % (os.environ['AWS_DEFAULT_REGION'],
+                                 requests.utils.default_user_agent())
         self.session = requests.Session()
         self.session.headers = {'x-ha-access': config.password,
-                                'content-type': 'application/json'}
+                                'content-type': 'application/json',
+                                'User-Agent': agent_fmt}
         self.session.verify = config.ssl_verify
 
     def build_url(self, relurl):
@@ -605,11 +610,14 @@ def mk_entity(ha, entity_id, supported_features=0):
 
 
 class Configuration(object):
-    def __init__(self, filename=None):
+    def __init__(self, filename=None, optsDict=None):
         self._json = {}
         if filename is not None:
             with open(filename) as f:
                 self._json = json.load(f)
+
+        if optsDict is not None:
+            self._json = optsDict
 
         opts = {}
         opts['url'] = self.get(['url', 'ha_url'],
